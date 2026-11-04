@@ -1,46 +1,26 @@
-name: Sync Eden Nightly APK from Official
-
+name: Sync Eden APK
 on:
+  workflow_dispatch:
   schedule:
-    - cron: '0 */6 * * *' # 每 6 小时自动检测一次更新（Nightly 发布频率较高）
-  workflow_dispatch: # 支持手动触发
-
+    - cron: '0 */6 * * *'
 permissions:
   contents: write
-
 jobs:
   sync:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: 提取并下载最新官方 Nightly APK
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - uses: actions/checkout@v4
+      - name: Fetch APK
         run: |
-          # 1. 调用 Forgejo API 获取最新一条发布记录
-          API_URL="https://git.eden-emu.dev/api/v1/repos/eden-ci/nightly/releases?limit=1"
-          echo "正在获取最新 Nightly 发布信息..."
-          RELEASE_JSON=$(curl -sS "$API_URL")
-
-          # 2. 提取 Tag 版本号
-          TAG_NAME=$(echo "$RELEASE_JSON" | jq -r '.[0].tag_name')
-          echo "最新构建标签: $TAG_NAME"
-
-          # 3. 筛选出 Android APK 的下载直链
-          APK_URL=$(echo "$RELEASE_JSON" | jq -r '.[0].assets[] | select(.name | contains("Android") and endswith(".apk")) | .browser_download_url')
-          APK_NAME=$(echo "$RELEASE_JSON" | jq -r '.[0].assets[] | select(.name | contains("Android") and endswith(".apk")) | .name')
-
-          if [ -z "$APK_URL" ]; then
-            echo "未在最新发布中匹配到 Android APK 文件，退出。"
-            exit 1
-          fi
-          echo "找到官方 APK: $APK_NAME"
-
-          # 4. 下载 APK 包
-          curl -L -o "$APK_NAME" "$APK_URL"
-
-          # 5. 发布到你的 GitHub Release 中
-          gh release view "$TAG_NAME" >/dev/null 2>&1 || gh release create "$TAG_NAME" --title "Eden Nightly $TAG_NAME" --notes "官方 Eden Nightly 构建同步，原始来源: git.eden-emu.dev/eden-ci/nightly"
-          gh release upload "$TAG_NAME" "$APK_NAME" --clobber
+          curl -s "https://git.eden-emu.dev/api/v1/repos/eden-ci/nightly/releases?limit=1" > data.json
+          APK=$(grep -o 'https://[^"]*Android[^"]*\.apk' data.json | head -n 1)
+          VER=$(grep -o '"tag_name":"[^"]*' data.json | head -n 1 | cut -d'"' -f4)
+          echo "APK_URL=$APK" >> $GITHUB_ENV
+          echo "VERSION=$VER" >> $GITHUB_ENV
+      - name: Download and Release
+        if: env.APK_URL != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          curl -L -o Eden-Nightly.apk "${{ env.APK_URL }}"
+          gh release create "${{ env.VERSION }}" Eden-Nightly.apk --title "Eden Nightly ${{ env.VERSION }}" || gh release upload "${{ env.VERSION }}" Eden-Nightly.apk --clobber
