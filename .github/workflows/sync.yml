@@ -1,26 +1,43 @@
 name: Sync Eden APK
+
 on:
   workflow_dispatch:
   schedule:
     - cron: '0 */6 * * *'
+
 permissions:
   contents: write
+
 jobs:
   sync:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      
       - name: Fetch APK
         run: |
           curl -s "https://git.eden-emu.dev/api/v1/repos/eden-ci/nightly/releases?limit=1" > data.json
-          APK=$(grep -o 'https://[^"]*Android[^"]*\.apk' data.json | head -n 1)
-          VER=$(grep -o '"tag_name":"[^"]*' data.json | head -n 1 | cut -d'"' -f4)
+          
+          # 修复 1：使用 jq 解析 JSON (Ubuntu默认自带) 提取 body 和 tag_name，更安全
+          BODY=$(jq -r '.[0].body' data.json)
+          VER=$(jq -r '.[0].tag_name' data.json)
+          
+          # 修复 2：严格限制正则表达式。只提取真实域名下的链接，且不包含空格和引号
+          APK=$(echo "$BODY" | grep -oE 'https://nightly\.eden-emu\.dev/[^" ]*Android[^" ]*\.apk' | head -n 1)
+          
           echo "APK_URL=$APK" >> $GITHUB_ENV
           echo "VERSION=$VER" >> $GITHUB_ENV
+          
+          echo "抓取到的版本号: $VER"
+          echo "抓取到的 APK 链接: $APK"
+
       - name: Download and Release
         if: env.APK_URL != ''
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # 修复 3：将变量直接注入到环境变量中，避免在 run 脚本里直接展开引发格式崩溃
+          MY_APK_URL: ${{ env.APK_URL }}
+          MY_VER: ${{ env.VERSION }}
         run: |
-          curl -L -o Eden-Nightly.apk "${{ env.APK_URL }}"
-          gh release create "${{ env.VERSION }}" Eden-Nightly.apk --title "Eden Nightly ${{ env.VERSION }}" || gh release upload "${{ env.VERSION }}" Eden-Nightly.apk --clobber
+          curl -L -o Eden-Nightly.apk "$MY_APK_URL"
+          gh release create "$MY_VER" Eden-Nightly.apk --title "Eden Nightly $MY_VER" || gh release upload "$MY_VER" Eden-Nightly.apk --clobber
