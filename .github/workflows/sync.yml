@@ -13,17 +13,17 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Fetch APK
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           curl -s "https://git.eden-emu.dev/api/v1/repos/eden-ci/nightly/releases?limit=1" > data.json
-          
+
           # 提取更新日志和版本号
           BODY=$(jq -r '.[0].body' data.json)
           VER=$(jq -r '.[0].tag_name' data.json)
-          
+
           # 检查你的仓库中是否已经存在这个版本
           if gh release view "$VER" > /dev/null 2>&1; then
             echo "版本 $VER 已经存在，跳过爬取和下载。"
@@ -31,10 +31,10 @@ jobs:
           else
             echo "发现新版本 $VER，准备下载。"
             echo "SKIP=false" >> $GITHUB_ENV
-            
+
             # 将更新日志保存到文件中（避免特殊符号导致脚本崩溃）
             echo "$BODY" > release_notes.md
-            
+
             # 提取 APK 链接
             APK=$(echo "$BODY" | grep -oE 'https://nightly\.eden-emu\.dev/[^" ]*Android[^" ]*\.apk' | head -n 1)
             echo "APK_URL=$APK" >> $GITHUB_ENV
@@ -50,21 +50,8 @@ jobs:
         run: |
           # 1. 下载最新的 APK
           curl -L -o Eden-Nightly.apk "$MY_APK_URL"
-          
-          # 2. 创建新的 Release 并附带更新日志
-          gh release create "$MY_VER" Eden-Nightly.apk --title "Eden Nightly $MY_VER" --notes-file release_notes.md
-          
-          # 3. 获取所有旧版本的 Tag（排除当前刚发布的新版本）
-          echo "开始清理旧版本..."
-          OLD_TAGS=$(gh release list --limit 100 --json tagName --jq '.[].tagName' | grep -v "^$MY_VER$" || true)
-          
-          # 4. 循环删除旧版本
-          if [ -n "$OLD_TAGS" ]; then
-            for tag in $OLD_TAGS; do
-              echo "删除旧版本: $tag"
-              gh release delete "$tag" --yes --cleanup-tag
-            done
-            echo "旧版本清理完成！"
-          else
-            echo "没有找到需要清理的旧版本。"
-          fi
+
+          # 2. 创建新的 Release 并附带更新日志（旧版本及其实更新日志会保留）
+          gh release create "$MY_VER" Eden-Nightly.apk \
+            --title "Eden Nightly $MY_VER" \
+            --notes-file release_notes.md
